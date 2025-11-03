@@ -2,8 +2,12 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.database import engine
-from app.models import Base
+from fastapi import Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
+from .database import engine, get_db
+from .models import Base, User
+from .schemas import UserRead, UserCreate
 
 # Replacing @app.on_event("startup")
 @asynccontextmanager
@@ -20,3 +24,25 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.get("/api/users/{user_id}", response_model = UserRead)
+def get_user(user_id: int, db: Session = Depends(get_db)):
+    user = db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return user
+
+@app.post("/api/users/", response_model = UserRead, status_code = status.HTTP_201_CREATED)
+def create_user(payload: UserCreate, db: Session = Depends(get_db)):
+    # create an ORM User instance from the Pydantic payload
+    user = User(**payload.model_dump())
+    db.add(user)
+    
+    try: 
+        db.commit()
+        db.refresh(user)
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Email or Student ID already registered")
+    return user
+
